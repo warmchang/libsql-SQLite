@@ -15,6 +15,7 @@ use crate::error::Result;
 use crate::io::buf::{ZeroCopyBoxIoBuf, ZeroCopyBuf};
 use crate::io::FileExt;
 use crate::segment::Frame;
+use crate::{LibsqlFooter, LIBSQL_MAGIC, LIBSQL_PAGE_SIZE, LIBSQL_WAL_VERSION};
 
 use super::Segment;
 
@@ -81,6 +82,13 @@ where
     where
         F: FileExt,
     {
+        struct Guard<'a>(&'a AtomicBool);
+        impl<'a> Drop for Guard<'a> {
+            fn drop(&mut self) {
+                self.0.store(false, Ordering::SeqCst);
+            }
+        }
+
         if self
             .checkpointing
             .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
@@ -88,6 +96,9 @@ where
         {
             return Ok(None);
         }
+
+        let _g = Guard(&self.checkpointing);
+
         let mut segs = Vec::new();
         let mut current = self.head.load();
         // find the longest chain of segments that can be checkpointed, iow, segments that do not have
@@ -147,6 +158,21 @@ where
             buf = read_buf.into_inner();
         }
 
+        // update the footer at the end of the db file.
+        let footer = LibsqlFooter {
+            magic: LIBSQL_MAGIC.into(),
+            version: LIBSQL_WAL_VERSION.into(),
+            replication_index: last_replication_index.into(),
+        };
+
+        let footer_offset = size_after as usize * LIBSQL_PAGE_SIZE as usize;
+        let (_, ret) = db_file
+            .write_all_at_async(ZeroCopyBuf::new_init(footer), footer_offset as u64)
+            .await;
+        ret?;
+
+        // todo: truncate if necessary
+
         //// todo: make async
         db_file.sync_all()?;
 
@@ -172,12 +198,10 @@ where
 
         db_file.set_len(size_after as u64 * 4096)?;
 
-        self.checkpointing.store(false, Ordering::SeqCst);
-
         Ok(Some(last_replication_index))
     }
 
-    /// returnsstream pages from the sealed segment list, and what's the lowest replication index
+    /// returns a stream of pages from the sealed segment list, and what's the lowest replication index
     /// that was covered. If the returned index is less than start frame_no, the missing frames
     /// must be read somewhere else.
     pub async fn stream_pages_from<'a>(

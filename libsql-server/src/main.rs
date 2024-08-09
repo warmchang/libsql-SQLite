@@ -42,6 +42,8 @@ struct Cli {
 
     #[clap(long, default_value = "127.0.0.1:8080", env = "SQLD_HTTP_LISTEN_ADDR")]
     http_listen_addr: SocketAddr,
+
+    /// Enable a web-based http console served at the /console route.
     #[clap(long)]
     enable_http_console: bool,
 
@@ -144,7 +146,7 @@ struct Cli {
     #[clap(long, env = "SQLD_HEARTBEAT_URL")]
     heartbeat_url: Option<String>,
 
-    /// The HTTP "Authornization" header to include in the a server heartbeat
+    /// The HTTP "Authorization" header to include in the a server heartbeat
     /// `POST` request.
     /// By default, the server doesn't send a heartbeat.
     #[clap(long, env = "SQLD_HEARTBEAT_AUTH")]
