@@ -53,6 +53,30 @@ impl Database {
         }
     }
 
+    /// Safety: this is like `open` but does not enfoce that sqlite_config has THREADSAFE set to
+    /// `SQLITE_CONFIG_SERIALIZED`, calling
+    pub unsafe fn open_raw<S: Into<String>>(db_path: S, flags: OpenFlags) -> Result<Database> {
+        let db_path = db_path.into();
+
+        if db_path.starts_with("libsql:")
+            || db_path.starts_with("http:")
+            || db_path.starts_with("https:")
+        {
+            Err(ConnectionFailed(format!(
+                "Unable to open local database {db_path} with Database::open()"
+            )))
+        } else {
+            Ok(Database {
+                db_path,
+                flags,
+                #[cfg(feature = "replication")]
+                replication_ctx: None,
+                #[cfg(feature = "sync")]
+                sync_ctx: None,
+            })
+        }
+    }
+
     #[cfg(feature = "replication")]
     pub async fn open_http_sync(
         connector: crate::util::ConnectorService,
@@ -96,6 +120,57 @@ impl Database {
         use crate::util::coerce_url_scheme;
 
         let mut db = Database::open(&db_path, OpenFlags::default())?;
+
+        let endpoint = coerce_url_scheme(endpoint);
+        let remote = crate::replication::client::Client::new(
+            connector.clone(),
+            endpoint
+                .as_str()
+                .try_into()
+                .map_err(|e: InvalidUri| crate::Error::Replication(e.into()))?,
+            auth_token.clone(),
+            version.as_deref(),
+            http_request_callback.clone(),
+            namespace,
+        )
+        .map_err(|e| crate::Error::Replication(e.into()))?;
+        let path = PathBuf::from(db_path);
+        let client = RemoteClient::new(remote.clone(), &path)
+            .await
+            .map_err(|e| crate::errors::Error::ConnectionFailed(e.to_string()))?;
+
+        let replicator =
+            EmbeddedReplicator::with_remote(client, path, 1000, encryption_config, sync_interval)
+                .await?;
+
+        db.replication_ctx = Some(ReplicationContext {
+            replicator,
+            client: Some(remote),
+            read_your_writes,
+        });
+
+        Ok(db)
+    }
+
+    #[cfg(feature = "replication")]
+    #[doc(hidden)]
+    pub async unsafe fn open_http_sync_internal2(
+        connector: crate::util::ConnectorService,
+        db_path: String,
+        endpoint: String,
+        auth_token: String,
+        version: Option<String>,
+        read_your_writes: bool,
+        encryption_config: Option<EncryptionConfig>,
+        sync_interval: Option<std::time::Duration>,
+        http_request_callback: Option<crate::util::HttpRequestCallback>,
+        namespace: Option<String>,
+    ) -> Result<Database> {
+        use std::path::PathBuf;
+
+        use crate::util::coerce_url_scheme;
+
+        let mut db = Database::open_raw(&db_path, OpenFlags::default())?;
 
         let endpoint = coerce_url_scheme(endpoint);
         let remote = crate::replication::client::Client::new(
@@ -391,29 +466,40 @@ impl Database {
         use crate::sync::SyncError;
         use crate::Error;
 
-        match self.try_push().await {
-            Ok(rep) => Ok(rep),
-            Err(Error::Sync(err)) => {
-                // Retry the sync because we are ahead of the server and we need to push some older
-                // frames.
-                if let Some(SyncError::InvalidPushFrameNoLow(_, _)) =
-                    err.downcast_ref::<SyncError>()
-                {
-                    tracing::debug!("got InvalidPushFrameNo, retrying push");
-                    self.try_push().await
-                } else {
-                    Err(Error::Sync(err))
+        let mut sync_ctx = self.sync_ctx.as_ref().unwrap().lock().await;
+        let conn = self.connect()?;
+
+        let durable_frame_no = sync_ctx.durable_frame_num();
+        let max_frame_no = conn.wal_frame_count();
+
+        if max_frame_no > durable_frame_no {
+            match self.try_push(&mut sync_ctx, &conn).await {
+                Ok(rep) => Ok(rep),
+                Err(Error::Sync(err)) => {
+                    // Retry the sync because we are ahead of the server and we need to push some older
+                    // frames.
+                    if let Some(SyncError::InvalidPushFrameNoLow(_, _)) =
+                        err.downcast_ref::<SyncError>()
+                    {
+                        tracing::debug!("got InvalidPushFrameNo, retrying push");
+                        self.try_push(&mut sync_ctx, &conn).await
+                    } else {
+                        Err(Error::Sync(err))
+                    }
                 }
+                Err(e) => Err(e),
             }
-            Err(e) => Err(e),
+        } else {
+            self.try_pull(&mut sync_ctx, &conn).await
         }
     }
 
     #[cfg(feature = "sync")]
-    async fn try_push(&self) -> Result<crate::database::Replicated> {
-        let mut sync_ctx = self.sync_ctx.as_ref().unwrap().lock().await;
-        let conn = self.connect()?;
-
+    async fn try_push(
+        &self,
+        sync_ctx: &mut SyncContext,
+        conn: &Connection,
+    ) -> Result<crate::database::Replicated> {
         let page_size = {
             let rows = conn
                 .query("PRAGMA page_size", crate::params::Params::None)?
@@ -424,9 +510,11 @@ impl Database {
         };
 
         let max_frame_no = conn.wal_frame_count();
-
         if max_frame_no == 0 {
-            return self.try_pull(&mut sync_ctx).await;
+            return Ok(crate::database::Replicated {
+                frame_no: None,
+                frames_synced: 0,
+            });
         }
 
         let generation = sync_ctx.generation(); // TODO: Probe from WAL.
@@ -452,10 +540,6 @@ impl Database {
 
         sync_ctx.write_metadata().await?;
 
-        if start_frame_no > end_frame_no {
-            return self.try_pull(&mut sync_ctx).await;
-        }
-
         // TODO(lucio): this can underflow if the server previously returned a higher max_frame_no
         // than what we have stored here.
         let frame_count = end_frame_no - start_frame_no + 1;
@@ -466,19 +550,25 @@ impl Database {
     }
 
     #[cfg(feature = "sync")]
-    async fn try_pull(&self, sync_ctx: &mut SyncContext) -> Result<crate::database::Replicated> {
+    async fn try_pull(
+        &self,
+        sync_ctx: &mut SyncContext,
+        conn: &Connection,
+    ) -> Result<crate::database::Replicated> {
         let generation = sync_ctx.generation();
         let mut frame_no = sync_ctx.durable_frame_num() + 1;
-        let conn = self.connect()?;
         conn.wal_insert_begin()?;
 
         let mut err = None;
 
         loop {
             match sync_ctx.pull_one_frame(generation, frame_no).await {
-                Ok(frame) => {
+                Ok(Some(frame)) => {
                     conn.wal_insert_frame(&frame)?;
                     frame_no += 1;
+                }
+                Ok(None) => {
+                    break;
                 }
                 Err(e) => {
                     tracing::debug!("pull_one_frame error: {:?}", e);

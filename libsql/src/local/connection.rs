@@ -355,6 +355,11 @@ impl Connection {
         Transaction::begin(self.clone(), tx_behavior)
     }
 
+    pub fn interrupt(&self) -> Result<()> {
+        unsafe { ffi::sqlite3_interrupt(self.raw) };
+        Ok(())
+    }
+
     pub fn is_autocommit(&self) -> bool {
         unsafe { ffi::sqlite3_get_autocommit(self.raw) != 0 }
     }
@@ -462,6 +467,13 @@ impl Connection {
         // and more efficient buffer usage for extracting wal frames and spliting them off.
         let mut buf = bytes::BytesMut::with_capacity(frame_size);
 
+        if frame_no == 0 {
+            return Err(errors::Error::SqliteFailure(
+                1,
+                "frame_no must be non-zero".to_string(),
+            ));
+        }
+
         let rc = unsafe {
             libsql_sys::ffi::libsql_wal_get_frame(
                 self.handle(),
@@ -506,13 +518,13 @@ impl Connection {
     }
 
     pub(crate) fn wal_insert_frame(&self, frame: &[u8]) -> Result<()> {
-        let rc = unsafe { 
+        let rc = unsafe {
             libsql_sys::ffi::libsql_wal_insert_frame(
                 self.handle(),
                 frame.len() as u32,
                 frame.as_ptr() as *mut std::ffi::c_void,
-                0
-            ) 
+                0,
+            )
         };
         if rc != 0 {
             return Err(crate::errors::Error::SqliteFailure(
