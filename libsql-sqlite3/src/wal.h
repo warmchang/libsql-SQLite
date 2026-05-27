@@ -225,6 +225,7 @@ typedef struct sqlite3_wal {
   unsigned int nCkpt;                 /* Checkpoint sequence counter in the wal-header */
   unsigned char lockError;            /* True if a locking error has occurred */
   WalIndexHdr *pSnapshot;             /* Start transaction here if not NULL */
+  int bGetSnapshot;                   /* Transaction opened for sqlite3_get_snapshot() */
   sqlite3 *db;
 } sqlite3_wal;
 
