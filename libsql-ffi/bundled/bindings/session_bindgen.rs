@@ -23,10 +23,10 @@ extern "C" {
     ) -> ::std::os::raw::c_int;
 }
 
-pub const SQLITE_VERSION: &[u8; 7] = b"3.45.1\0";
-pub const SQLITE_VERSION_NUMBER: i32 = 3045001;
+pub const SQLITE_VERSION: &[u8; 7] = b"3.46.1\0";
+pub const SQLITE_VERSION_NUMBER: i32 = 3046001;
 pub const SQLITE_SOURCE_ID: &[u8; 85] =
-    b"2024-01-30 16:01:20 e876e51a0ed5c5b3126f52e532044363a014bc594cfefa87ffb5b82257ccalt1\0";
+    b"2024-08-13 09:16:08 c9c2ab54ba1f5f46360f1b4f35d849cd3f080e6fc2b6c60e91b16c63f69aalt1\0";
 pub const LIBSQL_VERSION: &[u8; 6] = b"0.2.3\0";
 pub const SQLITE_OK: i32 = 0;
 pub const SQLITE_ERROR: i32 = 1;
@@ -263,6 +263,7 @@ pub const SQLITE_CONFIG_STMTJRNL_SPILL: i32 = 26;
 pub const SQLITE_CONFIG_SMALL_MALLOC: i32 = 27;
 pub const SQLITE_CONFIG_SORTERREF_SIZE: i32 = 28;
 pub const SQLITE_CONFIG_MEMDB_MAXSIZE: i32 = 29;
+pub const SQLITE_CONFIG_ROWID_IN_VIEW: i32 = 30;
 pub const SQLITE_DBCONFIG_MAINDBNAME: i32 = 1000;
 pub const SQLITE_DBCONFIG_LOOKASIDE: i32 = 1001;
 pub const SQLITE_DBCONFIG_ENABLE_FKEY: i32 = 1002;
@@ -956,7 +957,7 @@ extern "C" {
 extern "C" {
     pub fn sqlite3_vmprintf(
         arg1: *const ::std::os::raw::c_char,
-        arg2: va_list,
+        arg2: *mut __va_list_tag,
     ) -> *mut ::std::os::raw::c_char;
 }
 extern "C" {
@@ -972,7 +973,7 @@ extern "C" {
         arg1: ::std::os::raw::c_int,
         arg2: *mut ::std::os::raw::c_char,
         arg3: *const ::std::os::raw::c_char,
-        arg4: va_list,
+        arg4: *mut __va_list_tag,
     ) -> *mut ::std::os::raw::c_char;
 }
 extern "C" {
@@ -2522,7 +2523,7 @@ extern "C" {
     pub fn sqlite3_str_vappendf(
         arg1: *mut sqlite3_str,
         zFormat: *const ::std::os::raw::c_char,
-        arg2: va_list,
+        arg2: *mut __va_list_tag,
     );
 }
 extern "C" {
@@ -3225,6 +3226,12 @@ extern "C" {
         arg1: *mut sqlite3_changegroup,
         nData: ::std::os::raw::c_int,
         pData: *mut ::std::os::raw::c_void,
+    ) -> ::std::os::raw::c_int;
+}
+extern "C" {
+    pub fn sqlite3changegroup_add_change(
+        arg1: *mut sqlite3_changegroup,
+        arg2: *mut sqlite3_changeset_iter,
     ) -> ::std::os::raw::c_int;
 }
 extern "C" {
@@ -4085,4 +4092,12 @@ extern "C" {
 extern "C" {
     pub static sqlite3_wal_manager: libsql_wal_manager;
 }
-pub type __builtin_va_list = *mut ::std::os::raw::c_char;
+pub type __builtin_va_list = [__va_list_tag; 1usize];
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct __va_list_tag {
+    pub gp_offset: ::std::os::raw::c_uint,
+    pub fp_offset: ::std::os::raw::c_uint,
+    pub overflow_arg_area: *mut ::std::os::raw::c_void,
+    pub reg_save_area: *mut ::std::os::raw::c_void,
+}

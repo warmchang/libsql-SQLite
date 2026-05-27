@@ -79,7 +79,7 @@ static int fts5AsciiCreate(
       int i;
       memset(p, 0, sizeof(AsciiTokenizer));
       memcpy(p->aTokenChar, aAsciiTokenChar, sizeof(aAsciiTokenChar));
-      for(i=0; rc==SQLITE_OK && i<nArg; i+=2){
+      for(i=0; rc==SQLITE_OK && i<nArg-1; i+=2){
         const char *zArg = azArg[i+1];
         if( 0==sqlite3_stricmp(azArg[i], "tokenchars") ){
           fts5AsciiAddExceptions(p, zArg, 1);
@@ -90,6 +90,7 @@ static int fts5AsciiCreate(
           rc = SQLITE_ERROR;
         }
       }
+      if( rc==SQLITE_OK && i<nArg ) rc = SQLITE_ERROR;
       if( rc!=SQLITE_OK ){
         fts5AsciiDelete((Fts5Tokenizer*)p);
         p = 0;
@@ -381,17 +382,16 @@ static int fts5UnicodeCreate(
       }
 
       /* Search for a "categories" argument */
-      for(i=0; rc==SQLITE_OK && i<nArg; i+=2){
+      for(i=0; rc==SQLITE_OK && i<nArg-1; i+=2){
         if( 0==sqlite3_stricmp(azArg[i], "categories") ){
           zCat = azArg[i+1];
         }
       }
-
       if( rc==SQLITE_OK ){
         rc = unicodeSetCategories(p, zCat);
       }
 
-      for(i=0; rc==SQLITE_OK && i<nArg; i+=2){
+      for(i=0; rc==SQLITE_OK && i<nArg-1; i+=2){
         const char *zArg = azArg[i+1];
         if( 0==sqlite3_stricmp(azArg[i], "remove_diacritics") ){
           if( (zArg[0]!='0' && zArg[0]!='1' && zArg[0]!='2') || zArg[1] ){
@@ -416,6 +416,7 @@ static int fts5UnicodeCreate(
           rc = SQLITE_ERROR;
         }
       }
+      if( i<nArg && rc==SQLITE_OK ) rc = SQLITE_ERROR;
 
     }else{
       rc = SQLITE_NOMEM;
@@ -1290,46 +1291,41 @@ static int fts5TriCreate(
   Fts5Tokenizer **ppOut
 ){
   int rc = SQLITE_OK;
-  TrigramTokenizer *pNew = 0;
-
-  if( nArg%2 ){
-    rc = SQLITE_ERROR;
+  TrigramTokenizer *pNew = (TrigramTokenizer*)sqlite3_malloc(sizeof(*pNew));
+  UNUSED_PARAM(pUnused);
+  if( pNew==0 ){
+    rc = SQLITE_NOMEM;
   }else{
-    pNew = (TrigramTokenizer*)sqlite3_malloc(sizeof(*pNew));
-    UNUSED_PARAM(pUnused);
-    if( pNew==0 ){
-      rc = SQLITE_NOMEM;
-    }else{
-      int i;
-      pNew->bFold = 1;
-      pNew->iFoldParam = 0;
-      for(i=0; rc==SQLITE_OK && i<nArg; i+=2){
-        const char *zArg = azArg[i+1];
-        if( 0==sqlite3_stricmp(azArg[i], "case_sensitive") ){
-          if( (zArg[0]!='0' && zArg[0]!='1') || zArg[1] ){
-            rc = SQLITE_ERROR;
-          }else{
-            pNew->bFold = (zArg[0]=='0');
-          }
-        }else if( 0==sqlite3_stricmp(azArg[i], "remove_diacritics") ){
-          if( (zArg[0]!='0' && zArg[0]!='1' && zArg[0]!='2') || zArg[1] ){
-            rc = SQLITE_ERROR;
-          }else{
-            pNew->iFoldParam = (zArg[0]!='0') ? 2 : 0;
-          }
-        }else{
+    int i;
+    pNew->bFold = 1;
+    pNew->iFoldParam = 0;
+    for(i=0; rc==SQLITE_OK && i<nArg-1; i+=2){
+      const char *zArg = azArg[i+1];
+      if( 0==sqlite3_stricmp(azArg[i], "case_sensitive") ){
+        if( (zArg[0]!='0' && zArg[0]!='1') || zArg[1] ){
           rc = SQLITE_ERROR;
+        }else{
+          pNew->bFold = (zArg[0]=='0');
         }
-      }
-
-      if( pNew->iFoldParam!=0 && pNew->bFold==0 ){
+      }else if( 0==sqlite3_stricmp(azArg[i], "remove_diacritics") ){
+        if( (zArg[0]!='0' && zArg[0]!='1' && zArg[0]!='2') || zArg[1] ){
+          rc = SQLITE_ERROR;
+        }else{
+          pNew->iFoldParam = (zArg[0]!='0') ? 2 : 0;
+        }
+      }else{
         rc = SQLITE_ERROR;
       }
+    }
+    if( i<nArg && rc==SQLITE_OK ) rc = SQLITE_ERROR;
 
-      if( rc!=SQLITE_OK ){
-        fts5TriDelete((Fts5Tokenizer*)pNew);
-        pNew = 0;
-      }
+    if( pNew->iFoldParam!=0 && pNew->bFold==0 ){
+      rc = SQLITE_ERROR;
+    }
+
+    if( rc!=SQLITE_OK ){
+      fts5TriDelete((Fts5Tokenizer*)pNew);
+      pNew = 0;
     }
   }
   *ppOut = (Fts5Tokenizer*)pNew;

@@ -7164,7 +7164,7 @@ sqlite3_file *sqlite3PagerFile(Pager *pPager){
 ** This will be either the rollback journal or the WAL file.
 */
 sqlite3_file *sqlite3PagerJrnlFile(Pager *pPager){
-#if SQLITE_OMIT_WAL
+#ifdef SQLITE_OMIT_WAL
   return pPager->jfd;
 #else
   return pagerUseWal(pPager) ? pPager->wal->methods.xFile(pPager->wal->pData) : pPager->jfd;
