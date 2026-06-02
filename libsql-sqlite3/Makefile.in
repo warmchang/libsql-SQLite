@@ -1682,6 +1682,11 @@ threadtest: threadtest3$(TEXE)
 threadtest5: sqlite3.c $(TOP)/test/threadtest5.c
 	$(LTLINK) $(TOP)/test/threadtest5.c sqlite3.c -o $@ $(TLIBS)
 
+# Multi-threaded test of the libsql_stmt_interrupt() API.  Builds a small
+# standalone binary; run it directly to check the result.
+interrupttest: sqlite3.c $(TOP)/test/interrupttest.c
+	$(LTLINK) $(TOP)/test/interrupttest.c sqlite3.c -o $@ $(TLIBS)
+
 # Standard install and cleanup targets
 #
 liblibsql_wasm_install:	liblibsql_wasm

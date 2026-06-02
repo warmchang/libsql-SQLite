@@ -8970,6 +8970,7 @@ int Sqlitetest1_Init(Tcl_Interp *interp){
   extern int sqlite3_search_count;
   extern int sqlite3_found_count;
   extern int sqlite3_interrupt_count;
+  extern int sqlite3_stmt_interrupt_count;
   extern int sqlite3_open_file_count;
   extern int sqlite3_sort_count;
   extern int sqlite3_current_time;
@@ -9306,8 +9307,10 @@ int Sqlitetest1_Init(Tcl_Interp *interp){
       (char*)&sqlite3_max_blobsize, TCL_LINK_INT);
   Tcl_LinkVar(interp, "sqlite_like_count", 
       (char*)&sqlite3_like_count, TCL_LINK_INT);
-  Tcl_LinkVar(interp, "sqlite_interrupt_count", 
+  Tcl_LinkVar(interp, "sqlite_interrupt_count",
       (char*)&sqlite3_interrupt_count, TCL_LINK_INT);
+  Tcl_LinkVar(interp, "sqlite_stmt_interrupt_count",
+      (char*)&sqlite3_stmt_interrupt_count, TCL_LINK_INT);
   Tcl_LinkVar(interp, "sqlite_open_file_count", 
       (char*)&sqlite3_open_file_count, TCL_LINK_INT);
   Tcl_LinkVar(interp, "sqlite_current_time", 

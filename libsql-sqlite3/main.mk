@@ -1047,6 +1047,11 @@ threadtest3$(EXE): sqlite3.o $(THREADTEST3_SRC) $(TOP)/src/test_multiplex.c
 threadtest: threadtest3$(EXE)
 	./threadtest3$(EXE)
 
+# Multi-threaded test of the libsql_stmt_interrupt() API.  Builds a small
+# standalone binary; run it directly to check the result.
+interrupttest$(EXE): sqlite3.o $(TOP)/test/interrupttest.c
+	$(TCCX) $(TOP)/test/interrupttest.c sqlite3.o -o $@ $(THREADLIB)
+
 TEST_EXTENSION = $(SHPREFIX)testloadext.$(SO)
 $(TEST_EXTENSION): $(TOP)/src/test_loadext.c
 	$(MKSHLIB) $(TOP)/src/test_loadext.c -o $(TEST_EXTENSION)

@@ -897,7 +897,9 @@ void libsql_stmt_interrupt(sqlite3_stmt *pStmt){
     (void)SQLITE_MISUSE_BKPT;
     return;
   }
-  v->isInterrupted = 1;
+  /* Set atomically: this may be called from a different thread than the one
+  ** executing the statement, mirroring sqlite3_interrupt(). */
+  AtomicStore(&v->isInterrupted, 1);
 }
 
 /*
@@ -915,7 +917,7 @@ int sqlite3_step(sqlite3_stmt *pStmt){
     return SQLITE_MISUSE_BKPT;
   }
   db = v->db;
-  if( v->isInterrupted ){
+  if( AtomicLoad(&v->isInterrupted) ){
     rc = SQLITE_INTERRUPT;
     v->rc = rc;
     db->errCode = rc;

@@ -72,6 +72,12 @@ int sqlite3_search_count = 0;
 */
 #ifdef SQLITE_TEST
 int sqlite3_interrupt_count = 0;
+/*
+** As above, but simulates a statement-level interrupt
+** (libsql_stmt_interrupt()) on the statement that is currently executing,
+** rather than a connection-wide sqlite3_interrupt().
+*/
+int sqlite3_stmt_interrupt_count = 0;
 #endif
 
 /*
@@ -895,7 +901,9 @@ int sqlite3VdbeExec(
   p->iCurrentTime = 0;
   assert( p->explain==0 );
   db->busyHandler.nBusy = 0;
-  if( AtomicLoad(&db->u1.isInterrupted) ) goto abort_due_to_interrupt;
+  if( AtomicLoad(&db->u1.isInterrupted) || AtomicLoad(&p->isInterrupted) ){
+    goto abort_due_to_interrupt;
+  }
   sqlite3VdbeIOTraceSql(p);
 #ifdef SQLITE_DEBUG
   sqlite3BeginBenignMalloc();
@@ -962,6 +970,12 @@ int sqlite3VdbeExec(
       sqlite3_interrupt_count--;
       if( sqlite3_interrupt_count==0 ){
         sqlite3_interrupt(db);
+      }
+    }
+    if( sqlite3_stmt_interrupt_count>0 ){
+      sqlite3_stmt_interrupt_count--;
+      if( sqlite3_stmt_interrupt_count==0 ){
+        libsql_stmt_interrupt((sqlite3_stmt*)p);
       }
     }
 #endif
@@ -1085,7 +1099,9 @@ jump_to_p2_and_check_for_interrupt:
   ** checks on every opcode.  This helps sqlite3_step() to run about 1.5%
   ** faster according to "valgrind --tool=cachegrind" */
 check_for_interrupt:
-  if( AtomicLoad(&db->u1.isInterrupted) ) goto abort_due_to_interrupt;
+  if( AtomicLoad(&db->u1.isInterrupted) || AtomicLoad(&p->isInterrupted) ){
+    goto abort_due_to_interrupt;
+  }
 #ifndef SQLITE_OMIT_PROGRESS_CALLBACK
   /* Call the progress callback if it is configured and the required number
   ** of VDBE ops have been executed (either since this invocation of
@@ -9430,7 +9446,7 @@ no_mem:
   ** flag.
   */
 abort_due_to_interrupt:
-  assert( AtomicLoad(&db->u1.isInterrupted) );
+  assert( AtomicLoad(&db->u1.isInterrupted) || AtomicLoad(&p->isInterrupted) );
   rc = SQLITE_INTERRUPT;
   goto abort_due_to_error;
 }
